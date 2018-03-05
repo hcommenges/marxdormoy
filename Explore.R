@@ -113,21 +113,27 @@ leaflet() %>%
 
 class(lineRoad)
 centroLine <- as.data.frame(st_coordinates(x = lineRoad)) %>% 
-  mutate(X = formatC(X, digits = 4, drop0trailing = FALSE, format = "f"),
-         Y = formatC(Y, digits = 4, drop0trailing = FALSE, format = "f"),
-         KEY = paste(X, Y, sep = "_"))
-
-bibi <- dcast(data = centroLine, formula = KEY ~ L1)
-
-CollapseValues <- function(x) paste(x, collapse = ",")
-
-preEdges <- centroLine %>% 
-  group_by(KEY) %>% 
-  summarise(LINES = CollapseValues(L1))
-preEdgesSel <- preEdges[grepl(pattern = ",", x = preEdges$LINES), ]
-
-centroLineSel <- centroLine %>% filter(KEY %in% preEdgesSel$KEY) %>% 
-  group_by(L1) %>% 
-  summarise(n())
+  mutate(XROUND = formatC(X, digits = 3, drop0trailing = FALSE, format = "f"),
+         YROUND = formatC(Y, digits = 3, drop0trailing = FALSE, format = "f"),
+         KEY = paste(XROUND, YROUND, sep = "_"))
 
 
+
+centroLine$DUP1 <- !duplicated(centroLine$L1)
+centroLine$DUP2 <- rev(!duplicated(rev(centroLine$L1)))
+centroNodes <- centroLine %>% 
+  filter(DUP1 == TRUE | DUP2 == TRUE) %>% 
+  st_as_sf(coords = c("X", "Y"), crs = 2154)
+
+plot(lineRoad$geometry)
+plot(centroNodes$geometry, add = TRUE)
+
+edgeList <- centroNodes %>% st_set_geometry(NULL)
+edgeListOri <- edgeList$KEY[1:nrow(edgeList)-1]
+edgeListDes <- edgeList$KEY[2:nrow(edgeList)]
+oriDes <- cbind(edgeListOri, edgeListDes) %>% as_data_frame()
+
+library(igraph)
+
+netRoad <- graph.data.frame(d = oriDes, directed = FALSE)
+plot(netRoad)
