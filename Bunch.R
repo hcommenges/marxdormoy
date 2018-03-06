@@ -1,5 +1,5 @@
 ###############################################
-##### Explore GPS tracks : 1st experiment #####
+##### Plot bunch of tracks #####
 ###############################################
 
 
@@ -22,33 +22,37 @@ options(scipen = 100000)
 allFiles <- list.files(path = "DATA/Records-2017-12-16/")
 allNames <- gsub(x = allFiles, pattern = "_|-| |default|.json", replacement = "")
 allNamesCorr <- gsub(x = allNames, pattern = "[[:digit:]]", replacement = "")
-lineRoad <- st_read(dsn = "DATA/basemap/troncon_dormoy.shp", stringsAsFactors = FALSE, crs = 2154)
-
-# library(mapview)
-# library(mapedit)
-# boxSelection <- editMap(mapview())
-# boxSelection <- boxSelection$finished
-# saveRDS(boxSelection, file = "bboxdormoy.Rds")
-
 bboxDormoy <- readRDS(file = "DATA/basemap/bboxdormoy.Rds") %>% st_transform(crs = 2154)
+restWorld <- readRDS(file = "DATA/basemap/restworld.Rds")
 
 
 # extract one JSON ----
 
-oneJson <- fromJSON(txt = "DATA/Records-2017-12-16/default_Farrah_20171116-103915.json", 
-                    simplifyDataFrame = TRUE,
-                    flatten = TRUE)
-dataJson <- oneJson$data
-
-
-# clean records and create spatial object ----
-
-dataJson$CONCAT <- paste(dataJson$newValue.x, dataJson$newValue.y, sep = "_")
-dataJson$DUPLI <- !duplicated(dataJson$CONCAT)
-
-onePts <- dataJson[dataJson$DUPLI, ] %>% 
-  st_as_sf(agr = "constant", coords = c("newValue.y", "newValue.x"), crs = 4326) %>% 
-  st_transform(crs = 2154)
+listPts <- list()
+# i = allFiles[[1]]
+# i = "default_eleonore_20171115-1134.json"
+for(i in allFiles){
+  oneJson <- fromJSON(txt = paste0("DATA/Records-2017-12-16/", i), 
+                      simplifyDataFrame = TRUE,
+                      flatten = TRUE)
+  if(is.data.frame(oneJson)){
+    dataJson <- oneJson
+  } else {
+    dataJson <- oneJson$data
+  }
+  
+  dataJson$NAME <- i
+  dataJson$CONCAT <- paste(dataJson$newValue.x, dataJson$newValue.y, sep = "_")
+  dataJson$DUPLI <- !duplicated(dataJson$CONCAT)
+  
+  onePts <- dataJson[dataJson$DUPLI, ] %>% 
+    st_as_sf(agr = "constant", coords = c("newValue.y", "newValue.x"), crs = 4326) %>% 
+    st_transform(crs = 2154)
+  
+  if(nrow(onePts) > 50){
+    listPts[[length(listPts) + 1]] <- onePts
+  }
+}
 
 
 # compute time interval ----
@@ -64,13 +68,15 @@ GetInterval <- function(x){
   return(sfInterval)
 }
 
-oneInterval <- GetInterval(x = onePts)
+listIntervals <- lapply(listPts, GetInterval)
+allIntervals <- do.call(rbind, listIntervals)
 
 leaflet() %>% 
   addProviderTiles(provider = "Stamen.TonerLite") %>% 
-  addCircles(data = st_transform(oneInterval, crs = 4326), 
-             radius = 0.1 * sqrt(oneInterval$INTERVAL / pi),
+  addCircles(data = st_transform(allIntervals, crs = 4326), 
+             radius = 0.1 * sqrt(allIntervals$INTERVAL / pi),
              stroke = FALSE, fill = TRUE, fillColor = "firebrick", fillOpacity = 0.5)
+
 
 
 # make rectangular grid and intersect ----
@@ -79,13 +85,10 @@ geoGrid <- st_make_grid(x = bboxDormoy, cellsize = 120, crs = 2154, what = "poly
 oneGrid <- st_sf(IDGRID = seq(1, length(geoGrid), 1),
                  geometry = geoGrid)
 
-leaflet() %>% 
-  addProviderTiles(provider = "Stamen.TonerLite") %>% 
-  addPolygons(data = st_transform(oneGrid, crs = 4326))
-
-interGrid <- st_intersects(oneInterval, oneGrid)
-oneInterval$IDGRID <- unlist(interGrid)
-aggrTime <- oneInterval %>% 
+interGrid <- st_intersects(allIntervals, oneGrid)
+bibi <- unlist(interGrid)
+allIntervals$IDGRID <- unlist(interGrid)
+aggrTime <- allIntervals %>% 
   st_set_geometry(NULL) %>% 
   group_by(IDGRID) %>% 
   summarise(SUMTIME = sum(INTERVAL))
@@ -108,43 +111,3 @@ leaflet() %>%
   addCircles(data = st_transform(oneInterval, crs = 4326), 
              radius = 0.1 * sqrt(oneInterval$INTERVAL / pi),
              stroke = FALSE, fill = TRUE, fillColor = "grey30", fillOpacity = 0.5)
-
-
-# create street network ----
-
-class(lineRoad)
-centroLine <- as.data.frame(st_coordinates(x = lineRoad)) %>% 
-  mutate(XROUND = formatC(X, digits = 3, drop0trailing = FALSE, format = "f"),
-         YROUND = formatC(Y, digits = 3, drop0trailing = FALSE, format = "f"),
-         KEY = paste(XROUND, YROUND, sep = "_"))
-
-
-
-centroLine$DUP1 <- !duplicated(centroLine$L1)
-centroLine$DUP2 <- rev(!duplicated(rev(centroLine$L1)))
-centroNodes <- centroLine %>% 
-  filter(DUP1 == TRUE | DUP2 == TRUE) %>% 
-  st_as_sf(coords = c("X", "Y"), crs = 2154)
-
-plot(lineRoad$geometry)
-plot(centroNodes$geometry, add = TRUE)
-
-edgeList <- centroNodes %>% st_set_geometry(NULL)
-edgeListOri <- edgeList$KEY[seq(1, nrow(edgeList)-1, by = 2)]
-edgeListDes <- edgeList$KEY[seq(2, nrow(edgeList), by = 2)]
-oriDes <- cbind(edgeListOri, edgeListDes) %>% as_data_frame()
-
-
-
-netRoad <- graph.data.frame(d = oriDes, directed = FALSE)
-summary(netRoad)
-V(netRoad)$X <- as.numeric(substr(V(netRoad)$name, 1, 10))
-V(netRoad)$Y <- as.numeric(substr(V(netRoad)$name, 12, 22))
-
-plot(netRoad,
-     vertex.label = NA,
-     vertex.size = 3,
-     vertex.color = "black",
-     edge.color = "firebrick",
-     edge.width = 2,
-     layout = cbind(V(netRoad)$X, V(netRoad)$Y))
