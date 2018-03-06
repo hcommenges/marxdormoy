@@ -29,8 +29,8 @@ restWorld <- readRDS(file = "DATA/basemap/restworld.Rds")
 # extract one JSON ----
 
 listPts <- list()
-# i = allFiles[[1]]
-# i = "default_eleonore_20171115-1134.json"
+i = allFiles[[1]]
+i = "default_eleonore_20171115-1134.json"
 for(i in allFiles){
   oneJson <- fromJSON(txt = paste0("DATA/Records-2017-12-16/", i), 
                       simplifyDataFrame = TRUE,
@@ -86,9 +86,11 @@ oneGrid <- st_sf(IDGRID = seq(1, length(geoGrid), 1),
                  geometry = geoGrid)
 
 interGrid <- st_intersects(allIntervals, oneGrid)
-bibi <- unlist(interGrid)
-allIntervals$IDGRID <- unlist(interGrid)
-aggrTime <- allIntervals %>% 
+idIn <- sapply(interGrid, length)
+allIntervals$IDGRID <- sapply(interGrid, function(x) ifelse(length(x) > 0, x, 0))
+
+aggrTime <- allIntervals %>%
+  filter(IDGRID > 0) %>% 
   st_set_geometry(NULL) %>% 
   group_by(IDGRID) %>% 
   summarise(SUMTIME = sum(INTERVAL))
@@ -108,6 +110,6 @@ leaflet() %>%
   addPolygons(data = st_transform(oneGrid, crs = 4326),
               stroke = NULL, fill = TRUE, fillOpacity = 0.8,
               fillColor = gradOrange[oneGrid$COL]) %>% 
-  addCircles(data = st_transform(oneInterval, crs = 4326), 
-             radius = 0.1 * sqrt(oneInterval$INTERVAL / pi),
+  addCircles(data = st_transform(allIntervals, crs = 4326), 
+             radius = 0.1 * sqrt(allIntervals$INTERVAL / pi),
              stroke = FALSE, fill = TRUE, fillColor = "grey30", fillOpacity = 0.5)
